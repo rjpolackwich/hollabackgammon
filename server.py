@@ -2,37 +2,48 @@ import uvicorn
 import socketio
 from fastapi import FastAPI
 
-def handle_connect(sid, environ):
-    pass
+from bson.objectid import ObjectId
 
-class SocketManager:
-    def __init__(self, origins: list[str]):
-        self.server = socketio.AsyncServer(
-            cors_allowed_origins=origins,
-            async_mode="asgi",
-            logger=True,
-            engineio_logger=True,
-        )
-        self.app = socketio.ASGIApp(self.server)
+global registered
+registered = dict()
 
-    @property
-    def on(self):
-        return self.server.on
 
-    @property
-    def send(self):
-        return self.server.send
-
-    def mount_to(self, path: str, app: socketio.ASGIApp):
-        app.mount(path, self.app)
-
-socket_manager = SocketManager(["*"]) # do this better
-socket_manager.on("connect", handler=handle_connect)
-
+sio = socketio.AsyncServer(
+    cors_allowed_origins="http://localhost:4000",
+    async_mode="asgi",
+    logger=True,
+    engineio_logger=True,
+    )
+socket_app = socketio.ASGIApp(sio)
 app = FastAPI()
-socket_manager.mount_to("/ws", app)
+
+app.mount("/", socket_app)
+
+@sio.on("login")
+async def login(sid, data):
+    print(data)
+    username = data["username"]
+    password = data["password"]
+    if username in registered:
+        if registered["username"]["password"] == password:
+            await sio.emit("loginSuccess", registered["username"])
+    else:
+        await sio.emit("loginError", "not registered")
+
+
+@sio.on("register")
+async def register(sid, data):
+    print(data)
+    oid = ObjectId()
+    username = data["username"]
+    registered[username] = {
+        "_id": str(oid),
+        "_email": data["email"],
+        "_password": data["password"]
+    }
+    await sio.emit("registerSuccess", "yay")
 
 if __name__ == "__main__":
-    kwargs = {"host": "0.0.0.0", "port": 80}
+    kwargs = {"host": "0.0.0.0", "port": 4000}
     kwargs.update({"reload": True})
     uvicorn.run("server:app", **kwargs)
